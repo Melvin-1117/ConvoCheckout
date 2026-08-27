@@ -136,19 +136,31 @@ export async function matchIntentToCatalog(
     };
   }
 
-  // 4. Handle Disambiguation: Check if one product is an exact full name match
+  // 4. Handle Disambiguation: Check if one product is an exact or dominant token match
   let targetProduct: LeanProduct | null = null;
+  const queryLower = query.toLowerCase();
+  const tokens = queryLower.split(/\s+/).filter((t) => t.length > 1 && !['the', 'a', 'an', 'in', 'of', 'for', 'to'].includes(t));
+
   const exactNameMatch = searchResults.filter(
-    (p) => p.name.toLowerCase() === query.toLowerCase() || p.slug.toLowerCase() === query.toLowerCase()
+    (p) => p.name.toLowerCase() === queryLower || p.slug.toLowerCase() === queryLower
   );
 
   if (exactNameMatch.length === 1) {
     targetProduct = exactNameMatch[0];
   } else if (searchResults.length === 1) {
     targetProduct = searchResults[0];
+  } else if (tokens.length > 1) {
+    // Check if exactly one product contains all significant query tokens in its name
+    const allTokensInName = searchResults.filter((p) => {
+      const pName = p.name.toLowerCase();
+      return tokens.every((t) => pName.includes(t));
+    });
+    if (allTokensInName.length === 1) {
+      targetProduct = allTokensInName[0];
+    }
   }
 
-  // If multiple distinct products matched and none was an exact 1-to-1 name match
+  // If multiple distinct products matched and none was an exact/dominant match
   if (!targetProduct) {
     const candidateList = searchResults.slice(0, 5);
     const candidateNames = candidateList.map((c) => `'${c.name}'`).join(', ');

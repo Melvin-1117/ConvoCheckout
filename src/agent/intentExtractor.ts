@@ -165,11 +165,15 @@ export function heuristicExtractIntent(
   // Multi-turn context resolution
   let contextItem: string | null = null;
   if (conversationContext && conversationContext.length > 0) {
-    const lastMsg = conversationContext[conversationContext.length - 1];
-    const text = typeof lastMsg === 'string' ? lastMsg : lastMsg.content;
-    const match = text.match(/(?:found the|product|regarding)\s+([A-Za-z0-9\s]+?)(?:!|\?|\.|$)/i);
-    if (match) {
-      contextItem = match[1].trim();
+    for (let i = conversationContext.length - 1; i >= 0; i--) {
+      const msg = conversationContext[i];
+      const text = typeof msg === 'string' ? msg : msg.content;
+      const match = text.match(/(?:Product\s+|The\s+)?(?:\*\*|')([^*']+?)(?:\*\*|')/i) ||
+                    text.match(/(?:found the|product|regarding)\s+([A-Za-z0-9\s]+?)(?:!|\?|\.|$)/i);
+      if (match) {
+        contextItem = match[1].trim();
+        break;
+      }
     }
   }
 
@@ -236,7 +240,26 @@ export function heuristicExtractIntent(
     }
   }
 
-  // 6. Clarification response detection
+  // 6. Extract item query
+  let item_query: string | null = lower
+    .replace(/^(?:please\s+)?(?:buy|get\s+me|order|i\s+want\s+to\s+buy|i\s+want|i\s+need|can\s+i\s+get)\s+/i, '')
+    .replace(/\b\d+\s+of\s+the\b/i, '')
+    .replace(/\b\d+\b/i, '')
+    .replace(/\b(?:and\s+)?(?:in\s+)?size\s+[a-z0-9]+\b/i, '')
+    .replace(/\b(?:and\s+)?(?:in\s+)?color\s+[a-z\s]+\b/i, '')
+    .replace(/\b(?:and\s+)?color\s+[a-z\s]+\b/i, '')
+    .replace(/\bthe\s+/gi, '')
+    .trim();
+
+  if (color && item_query && item_query.toLowerCase() === color.toLowerCase()) {
+    item_query = contextItem || null;
+  }
+
+  if (!item_query || item_query.length < 2) {
+    item_query = contextItem || null;
+  }
+
+  // Clarification response detection
   if (contextItem && (size || color) && !lower.startsWith('buy') && !lower.startsWith('get')) {
     return {
       intent_type: 'clarification_response',
@@ -248,25 +271,11 @@ export function heuristicExtractIntent(
     };
   }
 
-  // 7. Extract item query
-  let item_query: string | null = lower
-    .replace(/^(?:please\s+)?(?:buy|get\s+me|order|i\s+want\s+to\s+buy|i\s+want|i\s+need|can\s+i\s+get)\s+/i, '')
-    .replace(/\b\d+\s+of\s+the\b/i, '')
-    .replace(/\b\d+\b/i, '')
-    .replace(/\bin\s+size\s+[a-z0-9]+/i, '')
-    .replace(/\bsize\s+[a-z0-9]+/i, '')
-    .replace(/\bthe\s+/gi, '')
-    .trim();
-
-  if (!item_query || item_query.length < 2) {
-    item_query = null;
-  }
-
   const isAmbiguous = !size && !color && (item_query === 'shoes' || item_query === 'shirts' || item_query === 'clothes');
 
   return {
     intent_type: 'purchase',
-    item_query: item_query || 'shoes',
+    item_query: item_query,
     variant: { size, color },
     quantity,
     confidence: isAmbiguous ? 0.8 : 0.95,
