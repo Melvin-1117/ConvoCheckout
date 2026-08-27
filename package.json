@@ -1,0 +1,38 @@
+{
+  "name": "convocheckout",
+  "version": "1.0.0",
+  "description": "Conversational In-App Checkout Agent for Razorpay Buildathon 2026",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "ts-node src/index.ts",
+    "seed:supabase": "ts-node scripts/seed-supabase.ts",
+    "verify:supabase": "ts-node scripts/verify-supabase.ts",
+    "test:catalog-api": "ts-node scripts/test-catalog-api.ts",
+    "test:intent": "ts-node scripts/test-intent-extraction.ts",
+    "start": "ts-node src/index.ts"
+  },
+  "keywords": [
+    "razorpay",
+    "conversational-commerce",
+    "checkout-agent",
+    "supabase",
+    "ai-agent"
+  ],
+  "author": "Antony Melvin",
+  "license": "ISC",
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "@supabase/supabase-js": "^2.49.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.13.5",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.3"
+  }
+}
