@@ -10,6 +10,7 @@
     "verify:supabase": "ts-node scripts/verify-supabase.ts",
     "test:catalog-api": "ts-node scripts/test-catalog-api.ts",
     "test:intent": "ts-node scripts/test-intent-extraction.ts",
+    "test:catalog-matching": "ts-node scripts/test-catalog-matching.ts",
     "start": "ts-node src/index.ts"
   },
   "keywords": [
