@@ -14,6 +14,7 @@
     "test:state-machine": "ts-node scripts/test-state-machine.ts",
     "test:confirmation": "ts-node scripts/test-confirmation-layer.ts",
     "test:razorpay": "ts-node scripts/test-razorpay-integration.ts",
+    "test:payment-tracking": "ts-node scripts/test-payment-tracking.ts",
     "start": "ts-node src/index.ts"
   },
   "keywords": [

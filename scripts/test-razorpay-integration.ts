@@ -244,7 +244,7 @@ async function runRazorpayIntegrationTests() {
 
   assert(tFail.state === 'FAILED', 'API failure routes state machine cleanly to FAILED');
   assert(
-    tFail.agent_message.includes('Payment Initialization Failed'),
+    tFail.agent_message.includes('Payment Failed'),
     'Agent informs user of payment initialization failure gracefully'
   );
 

@@ -127,7 +127,17 @@ export function generateAgentResponse(
     }
 
     case 'COMPLETED': {
-      return `🎉 **Payment Successful!** Your order has been placed. Thank you for shopping with ConvoCheckout!`;
+      const summary = session.active_order_summary;
+      const paymentId = event.type === 'PAYMENT_SUCCESS' ? event.payload.paymentId : 'Verified';
+      const itemDesc = summary
+        ? `${summary.quantity || 1}x **${summary.productName}** (${summary.variantName || summary.size || 'Standard'})`
+        : 'your order';
+
+      return (
+        `🎉 **Payment Successful!** (Payment ID: \`${paymentId}\`)\n\n` +
+        `Your order for ${itemDesc} totaling **${summary?.totalFormatted || '₹' + (summary?.total_amount || 0)}** has been placed.\n` +
+        `📦 We're preparing your package for shipment. Thank you for shopping with **ConvoCheckout**!`
+      );
     }
 
     case 'FAILED': {
@@ -135,7 +145,10 @@ export function generateAgentResponse(
         event.type === 'PAYMENT_FAILED'
           ? event.payload.error
           : 'Checkout was cancelled or payment failed.';
-      return `❌ **Payment Initialization Failed**: ${errorMsg}\n\nLet me know when you'd like to try again or modify your order.`;
+      return (
+        `❌ **Payment Failed**: ${errorMsg}\n\n` +
+        `👉 Would you like to **try again** with another payment method or **modify your order** (e.g. "change size to L", "restart")?`
+      );
     }
 
     case 'IDLE': {

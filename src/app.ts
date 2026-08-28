@@ -1,13 +1,20 @@
 import express, { Express, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import { catalogRouter } from './routes/catalogRoutes';
+import { webhookRouter } from './routes/webhookRoutes';
 
 export function createApp(): Express {
   const app = express();
 
   // Middleware
   app.use(cors());
-  app.use(express.json());
+  app.use(
+    express.json({
+      verify: (req: any, _res, buf) => {
+        req.rawBody = buf;
+      },
+    })
+  );
   app.use(express.urlencoded({ extended: true }));
 
   // Health check endpoint
@@ -21,6 +28,7 @@ export function createApp(): Express {
 
   // Mount API routers
   app.use('/api', catalogRouter);
+  app.use('/api/webhooks', webhookRouter);
 
   // 404 handler for unknown routes
   app.use((req: Request, res: Response) => {

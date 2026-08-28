@@ -40,6 +40,37 @@ export class SessionStore {
   }
 
   /**
+   * Lookup session by Razorpay Order ID
+   */
+  getByRazorpayOrderId(orderId: string): AgentSession | null {
+    if (!orderId) return null;
+    const cleanId = orderId.trim();
+    for (const session of this.sessions.values()) {
+      if (session.active_razorpay_order?.razorpay_order_id === cleanId) {
+        return session;
+      }
+      // Also check in active_order_summary metadata if present
+      if (
+        session.active_order_summary &&
+        (session.active_order_summary as any).razorpay_order_id === cleanId
+      ) {
+        return session;
+      }
+      // Check in audit events metadata
+      if (
+        session.audit_events.some(
+          (e) =>
+            e.metadata?.razorpayOrderId === cleanId ||
+            e.metadata?.razorpay_order_id === cleanId
+        )
+      ) {
+        return session;
+      }
+    }
+    return null;
+  }
+
+  /**
    * Save or update session in store
    */
   save(session: AgentSession): void {

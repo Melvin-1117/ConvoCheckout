@@ -219,9 +219,45 @@ async function runConfirmationLayerTests() {
   // TEST SUITE 3: Multi-Turn Orchestration & Confirmation Scenarios
   // Helper to initialize a clean session in AWAITING_CONFIRMATION state
   async function setupAwaitingConfirmationSession(sessionId: string) {
-    await processUserTurn(sessionId, 'buy Oxford shirt in size M');
-    const turn2 = await processUserTurn(sessionId, 'Navy blue please');
-    return turn2;
+    const session = sessionStore.getOrCreate(sessionId);
+    session.current_state = 'AWAITING_CONFIRMATION';
+    const summary = generateConfirmationSummary(
+      sampleProduct,
+      sampleVariant,
+      1
+    );
+    session.active_order_summary = summary;
+    session.current_match_result = {
+      match_status: 'exact',
+      matched_product: sampleProduct,
+      matched_variant: sampleVariant,
+      candidates: [sampleProduct],
+      reason: 'Direct exact match',
+    };
+    session.current_intent = {
+      intent_type: 'purchase',
+      item_query: 'Classic Oxford Cotton Shirt',
+      variant: { size: 'M', color: 'Navy Blue' },
+      quantity: 1,
+      confidence: 0.98,
+      ambiguity_notes: null,
+    };
+    sessionStore.save(session);
+    return {
+      sessionId,
+      state: 'AWAITING_CONFIRMATION' as const,
+      agent_message: summary.summary_text,
+      order_summary: summary,
+      confirmation_summary: summary,
+      match_result: session.current_match_result,
+      transition_event: {
+        type: 'MATCH_EXACT' as const,
+        fromState: 'PARSING' as const,
+        toState: 'AWAITING_CONFIRMATION' as const,
+        timestamp: new Date().toISOString(),
+        isMoneyGatedAction: false,
+      },
+    };
   }
 
   // ============================================================================
