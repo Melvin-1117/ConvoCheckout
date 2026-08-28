@@ -5,6 +5,18 @@ import { sessionStore } from './sessionStore';
 import { AgentTurnResponse, AgentSession, ConversationMessage } from './stateTypes';
 import { CatalogApiClient } from '../services/catalogApiClient';
 
+import {
+  parseConfirmationResponse,
+  mergeModificationIntoIntent,
+  generateConfirmationSummary,
+} from './confirmation';
+
+export {
+  parseConfirmationResponse,
+  generateConfirmationSummary,
+  mergeModificationIntoIntent,
+};
+
 export interface OrchestratorOptions {
   catalogClient?: CatalogApiClient;
   autoAdvancePayment?: boolean; // automatically advance CONFIRMED -> PAYING stub for demo
@@ -14,46 +26,14 @@ export interface OrchestratorOptions {
  * Checks if user message expresses affirmative confirmation
  */
 export function isAffirmative(text: string): boolean {
-  const clean = text.toLowerCase().trim().replace(/[!.,?]/g, '');
-  const affirmativeKeywords = [
-    'yes',
-    'confirm',
-    'proceed',
-    'ok',
-    'sure',
-    'yep',
-    'yeah',
-    'go ahead',
-    'place order',
-    'buy it',
-    'pay now',
-    'continue',
-    'correct',
-    'looks good',
-    'sounds good',
-    'do it',
-  ];
-  return affirmativeKeywords.some((kw) => clean === kw || clean.startsWith(kw));
+  return parseConfirmationResponse(text).decision === 'affirm';
 }
 
 /**
  * Checks if user message expresses negative rejection
  */
 export function isNegative(text: string): boolean {
-  const clean = text.toLowerCase().trim().replace(/[!.,?]/g, '');
-  const negativeKeywords = [
-    'no',
-    'cancel',
-    'stop',
-    'dont',
-    "don't",
-    'abort',
-    'nope',
-    'nevermind',
-    'reject',
-    'not now',
-  ];
-  return negativeKeywords.some((kw) => clean === kw || clean.startsWith(kw));
+  return parseConfirmationResponse(text).decision === 'reject';
 }
 
 /**
@@ -104,21 +84,23 @@ export async function processUserTurn(
       state: session.current_state,
       agent_message: transition.agentMessage,
       order_summary: session.active_order_summary,
+      confirmation_summary: session.active_order_summary,
       match_result: session.current_match_result,
       transition_event: transition.event,
     };
   }
 
-  // 3. Handle AWAITING_CONFIRMATION State: Check for Affirmative Yes / Negative No
+  // 3. Handle AWAITING_CONFIRMATION State using the Confirmation Layer
   if (session.current_state === 'AWAITING_CONFIRMATION') {
-    if (isAffirmative(trimmed)) {
-      // Step A: Unlock Confirmation Gate -> CONFIRMED
+    const confirmationResult = parseConfirmationResponse(trimmed);
+
+    // Case 3A: Clean Affirm -> Unlock Financial Gate -> CONFIRMED -> PAYING
+    if (confirmationResult.decision === 'affirm') {
       const confirmTransition = AgentStateMachine.transition(session, {
         type: 'CONFIRM_AFFIRMATIVE',
         payload: { userNotes: trimmed },
       });
 
-      // Step B: Auto-advance to PAYING (stub for Razorpay step)
       let finalTransition = confirmTransition;
       if (options.autoAdvancePayment ?? true) {
         const payingTransition = AgentStateMachine.transition(session, {
@@ -143,12 +125,14 @@ export async function processUserTurn(
         state: session.current_state,
         agent_message: finalTransition.agentMessage,
         order_summary: session.active_order_summary,
+        confirmation_summary: session.active_order_summary,
         match_result: session.current_match_result,
         transition_event: finalTransition.event,
       };
     }
 
-    if (isNegative(trimmed)) {
+    // Case 3B: Clean Reject -> Reset to IDLE
+    if (confirmationResult.decision === 'reject') {
       const rejectTransition = AgentStateMachine.transition(session, {
         type: 'CONFIRM_NEGATIVE',
         payload: { reason: `User rejected confirmation: "${trimmed}"` },
@@ -166,10 +150,118 @@ export async function processUserTurn(
         state: session.current_state,
         agent_message: rejectTransition.agentMessage,
         order_summary: session.active_order_summary,
+        confirmation_summary: session.active_order_summary,
         match_result: session.current_match_result,
         transition_event: rejectTransition.event,
       };
     }
+
+    // Case 3C: Modification Request -> Merge into current_intent -> Route to PARSING
+    if (confirmationResult.decision === 'modify') {
+      AgentStateMachine.transition(session, {
+        type: 'REQUEST_MODIFICATION',
+        payload: {
+          modifications: confirmationResult.modifications,
+          rawText: trimmed,
+        },
+      });
+
+      // Construct base intent from existing intent or resolved order summary
+      const activeSummary = session.active_order_summary;
+      const matchedProd = session.current_match_result?.matched_product;
+      const matchedVar = session.current_match_result?.matched_variant;
+
+      const baseIntent = session.current_intent
+        ? JSON.parse(JSON.stringify(session.current_intent))
+        : {
+            intent_type: 'purchase',
+            item_query: activeSummary?.productName || matchedProd?.name || null,
+            variant: {
+              size: activeSummary?.size || matchedVar?.size || null,
+              color: activeSummary?.color || matchedVar?.color || null,
+            },
+            quantity: activeSummary?.line_items?.[0]?.quantity || activeSummary?.quantity || 1,
+            confidence: 0.95,
+            ambiguity_notes: null,
+          };
+
+      if (!baseIntent.item_query && (activeSummary?.productName || matchedProd?.name)) {
+        baseIntent.item_query = activeSummary?.productName || matchedProd?.name;
+      }
+      if (!baseIntent.variant.size && (activeSummary?.size || matchedVar?.size)) {
+        baseIntent.variant.size = activeSummary?.size || matchedVar?.size;
+      }
+      if (!baseIntent.variant.color && (activeSummary?.color || matchedVar?.color)) {
+        baseIntent.variant.color = activeSummary?.color || matchedVar?.color;
+      }
+      if (activeSummary?.line_items?.[0]?.quantity && (!baseIntent.quantity || baseIntent.quantity <= 1)) {
+        baseIntent.quantity = activeSummary.line_items[0].quantity;
+      }
+
+      // Merge modifications directly without losing context
+      const mergedIntent = mergeModificationIntoIntent(
+        baseIntent,
+        confirmationResult.modifications
+      );
+
+      // Re-match modified intent against live catalog
+      const matchResult = await matchIntentToCatalog(mergedIntent, {
+        client: options.catalogClient,
+      });
+
+      const modifyTransition = AgentStateMachine.transition(session, {
+        type: 'INTENT_PARSED',
+        payload: {
+          intent: mergedIntent,
+          matchResult,
+        },
+      });
+
+      session.conversation_history.push({
+        role: 'agent',
+        content: modifyTransition.agentMessage,
+        timestamp: new Date().toISOString(),
+      });
+      sessionStore.save(session);
+
+      return {
+        sessionId,
+        state: session.current_state,
+        agent_message: modifyTransition.agentMessage,
+        order_summary: session.active_order_summary,
+        confirmation_summary: session.active_order_summary,
+        match_result: session.current_match_result,
+        transition_event: modifyTransition.event,
+      };
+    }
+
+    // Case 3D: Unclear / Pre-Purchase FAQ Question
+    // Re-Display Rule: Answer static FAQ if present, ALWAYS re-show confirmation summary,
+    // and STAY in AWAITING_CONFIRMATION (never implicitly affirm or proceed to payment).
+    const repromptTransition = AgentStateMachine.transition(session, {
+      type: 'CONFIRM_REPROMPT',
+      payload: {
+        faqAnswer: confirmationResult.faq_answer || undefined,
+        reason: `Ambiguous user response or FAQ inquiry during confirmation: "${trimmed}". Answering and re-displaying confirmation card.`,
+      },
+    });
+
+    session.conversation_history.push({
+      role: 'agent',
+      content: repromptTransition.agentMessage,
+      timestamp: new Date().toISOString(),
+    });
+    sessionStore.save(session);
+
+    return {
+      sessionId,
+      state: session.current_state,
+      agent_message: repromptTransition.agentMessage,
+      order_summary: session.active_order_summary,
+      confirmation_summary: session.active_order_summary,
+      match_result: session.current_match_result,
+      transition_event: repromptTransition.event,
+    };
   }
 
   // 4. Default Path: Transition to PARSING -> Intent Extraction -> Catalog Match
@@ -241,6 +333,7 @@ export async function processUserTurn(
     state: session.current_state,
     agent_message: transitionResult.agentMessage,
     order_summary: session.active_order_summary,
+    confirmation_summary: session.active_order_summary,
     match_result: session.current_match_result,
     transition_event: transitionResult.event,
   };

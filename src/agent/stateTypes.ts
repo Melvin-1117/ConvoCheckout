@@ -15,20 +15,51 @@ export type AgentState =
   | 'COMPLETED'
   | 'FAILED';
 
-export interface OrderSummaryDraft {
-  productId: string;
-  productName: string;
-  variantId: string;
-  variantName: string;
-  sku: string;
-  size: string | null;
-  color: string | null;
+export interface LineItem {
+  product_name: string;
+  variant_desc: string;
   quantity: number;
-  unitPricePaise: number;
-  unitPriceFormatted: string;
-  totalPaise: number;
-  totalFormatted: string;
+  unit_price: number;
+  subtotal: number;
+}
+
+export interface ConfirmationSummary {
+  summary_text: string;
+  line_items: LineItem[];
+  total_amount: number;
   currency: string;
+  productId?: string;
+  productName?: string;
+  variantId?: string;
+  variantName?: string;
+  sku?: string;
+  size?: string | null;
+  color?: string | null;
+  quantity?: number;
+  unitPricePaise?: number;
+  unitPriceFormatted?: string;
+  totalPaise?: number;
+  totalFormatted?: string;
+}
+
+export type OrderSummaryDraft = ConfirmationSummary;
+
+export type ConfirmationDecision = 'affirm' | 'reject' | 'modify' | 'unclear';
+
+export interface ConfirmationModifications {
+  size?: string | null;
+  color?: string | null;
+  quantity?: number | null;
+  item_query?: string | null;
+}
+
+export interface ParsedConfirmationResult {
+  decision: ConfirmationDecision;
+  confidence: number;
+  raw_message: string;
+  modifications?: ConfirmationModifications;
+  detected_faq_topic?: string | null;
+  faq_answer?: string | null;
 }
 
 export interface StateTransitionEvent {
@@ -49,7 +80,8 @@ export interface AgentSession {
   current_intent: ExtractedIntent | null;
   current_match_result: CatalogMatchResult | null;
   pending_clarification: string | null;
-  active_order_summary: OrderSummaryDraft | null;
+  active_order_summary: ConfirmationSummary | null;
+  active_confirmation_summary?: ConfirmationSummary | null;
   conversation_history: ConversationMessage[];
   created_at: string;
   updated_at: string;
@@ -59,9 +91,11 @@ export interface AgentSession {
 export type AgentEvent =
   | { type: 'USER_MESSAGE'; payload: { text: string } }
   | { type: 'INTENT_PARSED'; payload: { intent: ExtractedIntent; matchResult: CatalogMatchResult } }
-  | { type: 'PROMPT_CONFIRMATION'; payload?: { summary: OrderSummaryDraft } }
+  | { type: 'PROMPT_CONFIRMATION'; payload?: { summary: ConfirmationSummary } }
   | { type: 'CONFIRM_AFFIRMATIVE'; payload?: { userNotes?: string } }
   | { type: 'CONFIRM_NEGATIVE'; payload?: { reason?: string } }
+  | { type: 'CONFIRM_REPROMPT'; payload?: { faqAnswer?: string; reason?: string } }
+  | { type: 'REQUEST_MODIFICATION'; payload?: { modifications?: ConfirmationModifications; rawText?: string } }
   | { type: 'INITIATE_PAYMENT'; payload?: { razorpayOrderId?: string; paymentLinkUrl?: string } }
   | { type: 'PAYMENT_SUCCESS'; payload: { paymentId: string; razorpayOrderId?: string } }
   | { type: 'PAYMENT_FAILED'; payload: { error: string } }
@@ -71,7 +105,9 @@ export interface AgentTurnResponse {
   sessionId: string;
   state: AgentState;
   agent_message: string;
-  order_summary: OrderSummaryDraft | null;
+  order_summary: ConfirmationSummary | null;
+  confirmation_summary?: ConfirmationSummary | null;
   match_result: CatalogMatchResult | null;
   transition_event: StateTransitionEvent;
 }
+

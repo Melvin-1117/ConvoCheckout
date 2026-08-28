@@ -7,6 +7,11 @@ import {
 } from './stateTypes';
 import { CatalogMatchResult } from './catalogMatcher';
 
+import {
+  generateConfirmationSummary,
+  formatConfirmationCardWithPrompt,
+} from './confirmation';
+
 export class IllegalStateTransitionError extends Error {
   constructor(
     public readonly fromState: AgentState,
@@ -20,7 +25,7 @@ export class IllegalStateTransitionError extends Error {
 }
 
 /**
- * Generates an OrderSummaryDraft when a product and variant are resolved
+ * Generates an OrderSummaryDraft / ConfirmationSummary when a product and variant are resolved
  */
 export function createOrderSummary(
   matchResult: CatalogMatchResult,
@@ -31,32 +36,7 @@ export function createOrderSummary(
 
   if (!product || !variant) return null;
 
-  const qty = quantity > 0 ? quantity : 1;
-  const unitPrice = variant.price;
-  const totalPaise = unitPrice * qty;
-
-  const formatPaise = (paise: number) =>
-    new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      maximumFractionDigits: 2,
-    }).format(paise / 100);
-
-  return {
-    productId: product.id,
-    productName: product.name,
-    variantId: variant.id,
-    variantName: variant.name,
-    sku: variant.sku,
-    size: variant.size,
-    color: variant.color,
-    quantity: qty,
-    unitPricePaise: unitPrice,
-    unitPriceFormatted: formatPaise(unitPrice),
-    totalPaise,
-    totalFormatted: formatPaise(totalPaise),
-    currency: 'INR',
-  };
+  return generateConfirmationSummary(product, variant, quantity);
 }
 
 /**
@@ -71,15 +51,10 @@ export function generateAgentResponse(
     case 'AWAITING_CONFIRMATION': {
       const summary = session.active_order_summary;
       if (summary) {
-        return (
-          `🛍️ **Order Summary**\n` +
-          `• **Item:** ${summary.productName}\n` +
-          `• **Variant:** ${summary.variantName} (SKU: ${summary.sku})\n` +
-          `• **Quantity:** ${summary.quantity}\n` +
-          `• **Unit Price:** ${summary.unitPriceFormatted}\n` +
-          `• **Total Amount:** **${summary.totalFormatted}** (incl. taxes)\n\n` +
-          `Would you like me to confirm this order and proceed to secure checkout? (Reply **Yes** or **Confirm**)`
-        );
+        if (event.type === 'CONFIRM_REPROMPT') {
+          return formatConfirmationCardWithPrompt(summary, event.payload?.faqAnswer);
+        }
+        return formatConfirmationCardWithPrompt(summary);
       }
       return 'I have prepared your order details. Would you like to confirm and proceed to payment?';
     }
@@ -295,6 +270,14 @@ export class AgentStateMachine {
           nextState = 'IDLE';
           session.active_order_summary = null;
           reason = `Customer declined order confirmation (${event.payload?.reason || 'User said no'}). Resetting to IDLE.`;
+        } else if (event.type === 'CONFIRM_REPROMPT') {
+          nextState = 'AWAITING_CONFIRMATION';
+          reason = event.payload?.reason || 'Ambiguous response or FAQ query during confirmation. Re-prompting user for explicit confirmation.';
+          metadata = { faqAnswer: event.payload?.faqAnswer, reprompt: true };
+        } else if (event.type === 'REQUEST_MODIFICATION') {
+          nextState = 'PARSING';
+          reason = `Customer requested modification during confirmation (${event.payload?.rawText || 'attribute change'}). Routing to PARSING.`;
+          metadata = { modifications: event.payload?.modifications };
         } else if (event.type === 'CANCEL_RESET') {
           nextState = 'IDLE';
           session.active_order_summary = null;

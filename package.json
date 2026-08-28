@@ -12,6 +12,7 @@
     "test:intent": "ts-node scripts/test-intent-extraction.ts",
     "test:catalog-matching": "ts-node scripts/test-catalog-matching.ts",
     "test:state-machine": "ts-node scripts/test-state-machine.ts",
+    "test:confirmation": "ts-node scripts/test-confirmation-layer.ts",
     "start": "ts-node src/index.ts"
   },
   "keywords": [
