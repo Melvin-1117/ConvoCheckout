@@ -62,6 +62,20 @@ export interface ParsedConfirmationResult {
   faq_answer?: string | null;
 }
 
+export interface RazorpayOrderResult {
+  success: boolean;
+  razorpay_order_id?: string;
+  payment_link_url?: string;
+  amount?: number; // in paise
+  currency?: string;
+  status?: string;
+  receipt?: string;
+  notes?: Record<string, any>;
+  error?: string;
+  statusCode?: number;
+  isTransient?: boolean;
+}
+
 export interface StateTransitionEvent {
   sessionId: string;
   from_state: AgentState;
@@ -82,6 +96,7 @@ export interface AgentSession {
   pending_clarification: string | null;
   active_order_summary: ConfirmationSummary | null;
   active_confirmation_summary?: ConfirmationSummary | null;
+  active_razorpay_order?: RazorpayOrderResult | null;
   conversation_history: ConversationMessage[];
   created_at: string;
   updated_at: string;
@@ -96,9 +111,18 @@ export type AgentEvent =
   | { type: 'CONFIRM_NEGATIVE'; payload?: { reason?: string } }
   | { type: 'CONFIRM_REPROMPT'; payload?: { faqAnswer?: string; reason?: string } }
   | { type: 'REQUEST_MODIFICATION'; payload?: { modifications?: ConfirmationModifications; rawText?: string } }
-  | { type: 'INITIATE_PAYMENT'; payload?: { razorpayOrderId?: string; paymentLinkUrl?: string } }
+  | {
+      type: 'INITIATE_PAYMENT';
+      payload?: {
+        razorpayOrderId?: string;
+        paymentLinkUrl?: string;
+        amountPaise?: number;
+        formattedAmount?: string;
+        notes?: Record<string, any>;
+      };
+    }
   | { type: 'PAYMENT_SUCCESS'; payload: { paymentId: string; razorpayOrderId?: string } }
-  | { type: 'PAYMENT_FAILED'; payload: { error: string } }
+  | { type: 'PAYMENT_FAILED'; payload: { error: string; statusCode?: number } }
   | { type: 'CANCEL_RESET'; payload?: { reason?: string } };
 
 export interface AgentTurnResponse {
@@ -107,6 +131,8 @@ export interface AgentTurnResponse {
   agent_message: string;
   order_summary: ConfirmationSummary | null;
   confirmation_summary?: ConfirmationSummary | null;
+  razorpay_order?: RazorpayOrderResult | null;
+  payment_link_url?: string | null;
   match_result: CatalogMatchResult | null;
   transition_event: StateTransitionEvent;
 }

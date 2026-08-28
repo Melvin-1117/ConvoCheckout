@@ -104,6 +104,10 @@ export function transformProduct(
 }
 
 export class CatalogRepository {
+  private static cachedProducts: LeanProduct[] | null = null;
+  private static cacheTimestamp = 0;
+  private static CACHE_TTL_MS = 30000;
+
   /**
    * Fetch all categories
    */
@@ -169,6 +173,24 @@ export class CatalogRepository {
       return transformed;
     }
 
+    // Check in-memory cache for fast sub-millisecond responses
+    if (this.cachedProducts && Date.now() - this.cacheTimestamp < this.CACHE_TTL_MS) {
+      let filtered = this.cachedProducts;
+      if (category) {
+        const catLower = category.toLowerCase().trim();
+        filtered = filtered.filter(
+          (p) =>
+            p.categorySlug?.toLowerCase() === catLower ||
+            p.categoryName?.toLowerCase() === catLower ||
+            p.categoryId === category
+        );
+      }
+      if (inStockOnly) {
+        filtered = filtered.filter((p) => p.inStock);
+      }
+      return filtered;
+    }
+
     // Live Supabase query
     let query = supabase
       .from('products')
@@ -191,22 +213,22 @@ export class CatalogRepository {
       }
     }
 
-    const { data: products, error: prodErr } = await query;
-    if (prodErr) throw new Error(`Failed to fetch products: ${prodErr.message}`);
+    const [productsRes, variantsRes, categoriesRes] = await Promise.all([
+      Promise.resolve(query),
+      Promise.resolve(supabase.from('product_variants').select('*').eq('is_active', true)),
+      Promise.resolve(supabase.from('categories').select('*')),
+    ]);
+
+    const products = productsRes.data;
+    if (productsRes.error) throw new Error(`Failed to fetch products: ${productsRes.error.message}`);
     if (!products || products.length === 0) return [];
 
-    const { data: variants } = await supabase
-      .from('product_variants')
-      .select('*')
-      .eq('is_active', true);
-
-    const { data: categories } = await supabase.from('categories').select('*');
-    const categoryMap = new Map<string, CategoryRow>(
-      ((categories || []) as CategoryRow[]).map((c) => [c.id, c])
-    );
+    const variants = (variantsRes.data || []) as ProductVariantRow[];
+    const categories = (categoriesRes.data || []) as CategoryRow[];
+    const categoryMap = new Map<string, CategoryRow>(categories.map((c) => [c.id, c]));
 
     const variantMap = new Map<string, ProductVariantRow[]>();
-    for (const v of (variants || []) as ProductVariantRow[]) {
+    for (const v of variants) {
       const list = variantMap.get(v.product_id) || [];
       list.push(v);
       variantMap.set(v.product_id, list);
@@ -217,6 +239,11 @@ export class CatalogRepository {
       const vars = variantMap.get(p.id) || [];
       return transformProduct(p, cat, vars, true);
     });
+
+    if (!category) {
+      this.cachedProducts = transformed;
+      this.cacheTimestamp = Date.now();
+    }
 
     if (inStockOnly) {
       transformed = transformed.filter((p) => p.inStock);

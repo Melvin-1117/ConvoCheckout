@@ -25,68 +25,75 @@ export class AuditRepository {
    * Log an agent decision, intent parsing step, inventory check, or payment transition
    */
   static async logAudit(entry: LogAuditInput): Promise<AuditLogRow> {
-    if (!isSupabaseConfigured()) {
-      const logEntry: AuditLogRow = {
-        id: `aud-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        session_id: entry.sessionId || null,
-        order_id: entry.orderId || null,
-        action_type: entry.actionType,
-        category: entry.category,
-        decision_rationale: entry.decisionRationale,
-        input_data: entry.inputData || {},
-        output_data: entry.outputData || {},
-        status: entry.status || 'SUCCESS',
-        is_money_action: entry.isMoneyAction ?? false,
-        timestamp: new Date().toISOString(),
-      };
-      InMemoryStore.auditLogs.push(logEntry);
-      return logEntry;
+    const inMemoryEntry: AuditLogRow = {
+      id: `aud-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      session_id: entry.sessionId || null,
+      order_id: entry.orderId || null,
+      action_type: entry.actionType,
+      category: entry.category,
+      decision_rationale: entry.decisionRationale,
+      input_data: entry.inputData || {},
+      output_data: entry.outputData || {},
+      status: entry.status || 'SUCCESS',
+      is_money_action: entry.isMoneyAction ?? false,
+      timestamp: new Date().toISOString(),
+    };
+    InMemoryStore.auditLogs.push(inMemoryEntry);
+
+    if (isSupabaseConfigured()) {
+      // Non-blocking background sync to Supabase database
+      Promise.resolve(
+        supabase.from('audit_logs').insert({
+          session_id: entry.sessionId || null,
+          order_id: entry.orderId || null,
+          action_type: entry.actionType,
+          category: entry.category,
+          decision_rationale: entry.decisionRationale,
+          input_data: entry.inputData || {},
+          output_data: entry.outputData || {},
+          status: entry.status || 'SUCCESS',
+          is_money_action: entry.isMoneyAction ?? false,
+        })
+      )
+        .then(() => {})
+        .catch((err: any) => {
+          console.warn(`[AuditRepository] Background write notice: ${err?.message}`);
+        });
     }
 
-    const { data, error } = await supabase
-      .from('audit_logs')
-      .insert({
-        session_id: entry.sessionId || null,
-        order_id: entry.orderId || null,
-        action_type: entry.actionType,
-        category: entry.category,
-        decision_rationale: entry.decisionRationale,
-        input_data: entry.inputData || {},
-        output_data: entry.outputData || {},
-        status: entry.status || 'SUCCESS',
-        is_money_action: entry.isMoneyAction ?? false,
-      })
-      .select('*')
-      .single();
-
-    if (error || !data) {
-      console.error(`Audit logging failed: ${error?.message}`);
-      throw new Error(`Failed to record audit log: ${error?.message}`);
-    }
-
-    return data as AuditLogRow;
+    return inMemoryEntry;
   }
 
   /**
    * Fetch full audit trail for a specific conversation session
    */
   static async getAuditTrailBySession(sessionId: string): Promise<AuditLogRow[]> {
+    const memoryLogs = InMemoryStore.auditLogs
+      .filter((l) => l.session_id === sessionId)
+      .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+    if (memoryLogs.length > 0) {
+      return memoryLogs;
+    }
+
     if (!isSupabaseConfigured()) {
-      return InMemoryStore.auditLogs
-        .filter((l) => l.session_id === sessionId)
-        .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+      return [];
     }
 
-    const { data, error } = await supabase
-      .from('audit_logs')
-      .select('*')
-      .eq('session_id', sessionId)
-      .order('timestamp', { ascending: true });
+    try {
+      const { data, error } = await supabase
+        .from('audit_logs')
+        .select('*')
+        .eq('session_id', sessionId)
+        .order('timestamp', { ascending: true });
 
-    if (error) {
-      throw new Error(`Failed to fetch session audit trail: ${error.message}`);
+      if (error) {
+        return [];
+      }
+      return (data || []) as AuditLogRow[];
+    } catch {
+      return [];
     }
-    return (data || []) as AuditLogRow[];
   }
 
   /**

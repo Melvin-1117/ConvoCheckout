@@ -103,14 +103,26 @@ export function generateAgentResponse(
 
     case 'CONFIRMED': {
       const summary = session.active_order_summary;
-      return `✅ Order for **${summary?.quantity}x ${summary?.productName}** confirmed! Preparing secure Razorpay payment...`;
+      return `✅ Order for **${summary?.quantity || 1}x ${summary?.productName}** confirmed! Preparing secure Razorpay payment...`;
     }
 
     case 'PAYING': {
       const summary = session.active_order_summary;
+      const rzpOrder = session.active_razorpay_order;
+      const orderId =
+        event.type === 'INITIATE_PAYMENT'
+          ? event.payload?.razorpayOrderId || rzpOrder?.razorpay_order_id
+          : rzpOrder?.razorpay_order_id;
+      const paymentLink =
+        event.type === 'INITIATE_PAYMENT'
+          ? event.payload?.paymentLinkUrl || rzpOrder?.payment_link_url
+          : rzpOrder?.payment_link_url;
+      const totalFormatted = summary?.totalFormatted || `₹${summary?.total_amount || 0}`;
+
       return (
-        `💳 **Payment Ready** for ${summary?.totalFormatted || 'your order'}.\n` +
-        `Razorpay order initialized. Complete your transaction via the payment link or test gateway.`
+        `💳 **Payment Ready** for **${totalFormatted}**.\n\n` +
+        `Razorpay order initialized (${orderId || 'Active'}). Complete your transaction securely via the payment link below or standard checkout modal:\n\n` +
+        `👉 **[Pay with Razorpay](${paymentLink || '#'})**`
       );
     }
 
@@ -119,7 +131,11 @@ export function generateAgentResponse(
     }
 
     case 'FAILED': {
-      return `❌ Checkout was cancelled or payment failed. Let me know when you'd like to try again!`;
+      const errorMsg =
+        event.type === 'PAYMENT_FAILED'
+          ? event.payload.error
+          : 'Checkout was cancelled or payment failed.';
+      return `❌ **Payment Initialization Failed**: ${errorMsg}\n\nLet me know when you'd like to try again or modify your order.`;
     }
 
     case 'IDLE': {
@@ -295,7 +311,12 @@ export class AgentStateMachine {
           validateTransition(fromState, 'PAYING', event);
           nextState = 'PAYING';
           isMoneyGatedAction = true;
-          reason = `Payment initialization started for confirmed order (${session.active_order_summary?.sku}).`;
+          reason = `Payment initialization started for confirmed order (${session.active_order_summary?.sku || 'Item'}). Razorpay Order ID: ${event.payload?.razorpayOrderId || 'N/A'}.`;
+          metadata = event.payload || {};
+        } else if (event.type === 'PAYMENT_FAILED') {
+          nextState = 'FAILED';
+          isMoneyGatedAction = true;
+          reason = `Payment order creation failed: ${event.payload.error}.`;
           metadata = event.payload || {};
         } else if (event.type === 'CANCEL_RESET') {
           nextState = 'FAILED';

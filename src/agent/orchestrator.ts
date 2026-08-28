@@ -11,15 +11,24 @@ import {
   generateConfirmationSummary,
 } from './confirmation';
 
+import {
+  createRazorpayOrder,
+  RazorpayClientConfig,
+  RazorpayApiClient,
+} from '../services/razorpayService';
+
 export {
   parseConfirmationResponse,
   generateConfirmationSummary,
   mergeModificationIntoIntent,
+  createRazorpayOrder,
 };
 
 export interface OrchestratorOptions {
   catalogClient?: CatalogApiClient;
-  autoAdvancePayment?: boolean; // automatically advance CONFIRMED -> PAYING stub for demo
+  autoAdvancePayment?: boolean; // automatically advance CONFIRMED -> PAYING
+  razorpayConfig?: RazorpayClientConfig;
+  simulateRazorpayFailure?: 'network' | 'rate_limit' | 'bad_request' | 'unauthorized';
 }
 
 /**
@@ -85,6 +94,8 @@ export async function processUserTurn(
       agent_message: transition.agentMessage,
       order_summary: session.active_order_summary,
       confirmation_summary: session.active_order_summary,
+      razorpay_order: session.active_razorpay_order,
+      payment_link_url: session.active_razorpay_order?.payment_link_url,
       match_result: session.current_match_result,
       transition_event: transition.event,
     };
@@ -94,7 +105,7 @@ export async function processUserTurn(
   if (session.current_state === 'AWAITING_CONFIRMATION') {
     const confirmationResult = parseConfirmationResponse(trimmed);
 
-    // Case 3A: Clean Affirm -> Unlock Financial Gate -> CONFIRMED -> PAYING
+    // Case 3A: Clean Affirm -> Unlock Financial Gate -> CONFIRMED -> Call Razorpay -> PAYING / FAILED
     if (confirmationResult.decision === 'affirm') {
       const confirmTransition = AgentStateMachine.transition(session, {
         type: 'CONFIRM_AFFIRMATIVE',
@@ -103,14 +114,41 @@ export async function processUserTurn(
 
       let finalTransition = confirmTransition;
       if (options.autoAdvancePayment ?? true) {
-        const payingTransition = AgentStateMachine.transition(session, {
-          type: 'INITIATE_PAYMENT',
-          payload: {
-            razorpayOrderId: `order_mock_${Date.now()}`,
-            paymentLinkUrl: `https://rzp.io/i/mock_${Date.now().toString(36)}`,
-          },
-        });
-        finalTransition = payingTransition;
+        if (session.active_order_summary) {
+          const razorpayResult = await createRazorpayOrder(
+            session.active_order_summary,
+            sessionId,
+            {
+              session,
+              sessionState: session.current_state,
+              clientConfig: options.razorpayConfig,
+              simulateFailure: options.simulateRazorpayFailure,
+            }
+          );
+
+          session.active_razorpay_order = razorpayResult;
+
+          if (razorpayResult.success) {
+            finalTransition = AgentStateMachine.transition(session, {
+              type: 'INITIATE_PAYMENT',
+              payload: {
+                razorpayOrderId: razorpayResult.razorpay_order_id,
+                paymentLinkUrl: razorpayResult.payment_link_url,
+                amountPaise: razorpayResult.amount,
+                formattedAmount: session.active_order_summary.totalFormatted,
+                notes: razorpayResult.notes,
+              },
+            });
+          } else {
+            finalTransition = AgentStateMachine.transition(session, {
+              type: 'PAYMENT_FAILED',
+              payload: {
+                error: razorpayResult.error || 'Razorpay order creation failed',
+                statusCode: razorpayResult.statusCode,
+              },
+            });
+          }
+        }
       }
 
       session.conversation_history.push({
@@ -126,6 +164,8 @@ export async function processUserTurn(
         agent_message: finalTransition.agentMessage,
         order_summary: session.active_order_summary,
         confirmation_summary: session.active_order_summary,
+        razorpay_order: session.active_razorpay_order,
+        payment_link_url: session.active_razorpay_order?.payment_link_url,
         match_result: session.current_match_result,
         transition_event: finalTransition.event,
       };
@@ -334,6 +374,8 @@ export async function processUserTurn(
     agent_message: transitionResult.agentMessage,
     order_summary: session.active_order_summary,
     confirmation_summary: session.active_order_summary,
+    razorpay_order: session.active_razorpay_order,
+    payment_link_url: session.active_razorpay_order?.payment_link_url,
     match_result: session.current_match_result,
     transition_event: transitionResult.event,
   };

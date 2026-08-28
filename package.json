@@ -13,6 +13,7 @@
     "test:catalog-matching": "ts-node scripts/test-catalog-matching.ts",
     "test:state-machine": "ts-node scripts/test-state-machine.ts",
     "test:confirmation": "ts-node scripts/test-confirmation-layer.ts",
+    "test:razorpay": "ts-node scripts/test-razorpay-integration.ts",
     "start": "ts-node src/index.ts"
   },
   "keywords": [
