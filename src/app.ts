@@ -1,7 +1,9 @@
 import express, { Express, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
+import path from 'path';
 import { catalogRouter } from './routes/catalogRoutes';
 import { webhookRouter } from './routes/webhookRoutes';
+import { chatRouter } from './routes/chatRoutes';
 
 export function createApp(): Express {
   const app = express();
@@ -17,6 +19,10 @@ export function createApp(): Express {
   );
   app.use(express.urlencoded({ extended: true }));
 
+  // Static Assets (Google Stitch UI Frontend)
+  const publicDir = path.join(__dirname, '../public');
+  app.use(express.static(publicDir));
+
   // Health check endpoint
   app.get('/health', (_req: Request, res: Response) => {
     res.json({
@@ -28,6 +34,7 @@ export function createApp(): Express {
 
   // Mount API routers
   app.use('/api', catalogRouter);
+  app.use('/api/chat', chatRouter);
   app.use('/api/webhooks', webhookRouter);
 
   // 404 handler for unknown routes
