@@ -300,7 +300,7 @@ export async function extractIntent(
   options: IntentExtractionOptions = {}
 ): Promise<ExtractedIntent> {
   const apiKey = options.apiKey || process.env.GEMINI_API_KEY;
-  const modelName = options.modelName || process.env.GEMINI_MODEL || 'gemini-1.5-flash';
+  const modelName = options.modelName || process.env.GEMINI_MODEL || 'gemini-3.6-flash';
   const maxRetries = options.maxRetries ?? 3;
   const backoffInitialMs = options.backoffInitialMs ?? 1000;
   const enableOfflineFallback = options.enableOfflineFallback ?? true;
